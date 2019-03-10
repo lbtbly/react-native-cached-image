@@ -75,7 +75,6 @@ module.exports = (defaultOptions = {}, urlCache = MemoryCache, fs = fsUtils, pat
          * @returns {Promise}
          */
         downloadAndCacheUrl(url, options = {}) {
-            console.log("yeahpidoooo");
             return cacheUrl(
                 url,
                 options,
