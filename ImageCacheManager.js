@@ -72,13 +72,14 @@ module.exports = (defaultOptions = {}, urlCache = MemoryCache, fs = fsUtils, pat
          * download an image and cache the result according to the given options
          * @param url
          * @param options
+         * @param progressHandler
          * @returns {Promise}
          */
-        downloadAndCacheUrl(url, options = {}) {
+        downloadAndCacheUrl(url, options = {}, progressHandler, progressCount) {
             return cacheUrl(
                 url,
                 options,
-                filePath => fs.downloadFile(url, filePath, options.headers)
+                filePath => fs.downloadFile(url, filePath, options.headers, progressHandler, progressCount)
             );
         },
 

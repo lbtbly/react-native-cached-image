@@ -85,7 +85,7 @@ module.exports = {
      * @param headers   Object with headers to use when downloading the file
      * @returns {Promise}
      */
-    downloadFile(fromUrl, toFile, headers) {
+    downloadFile(fromUrl, toFile, headers, progressHandler, progressCount) {
         // use toFile as the key as is was created using the cacheKey
         if (!_.has(activeDownloads, toFile)) {
             // using a temporary file, if the download is accidentally interrupted, it will not produce a disabled file
@@ -97,8 +97,8 @@ module.exports = {
                         path: tmpFile
                     })
                     .fetch('GET', fromUrl, headers)
-                    .progress({ count : 5 }, (received, total) => {
-                        console.log('progress: '+received+' out of '+total+' -- '+fromUrl);
+                    .progress({ count : !!progressCount ? progressCount : 1 }, (received, total) => {
+                        !!progressHandler && progressHandler(fromUrl, received, total);
                     })
                     .then(res => {
                         if (res.respInfo.status === 304) {
