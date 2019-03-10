@@ -97,6 +97,9 @@ module.exports = {
                         path: tmpFile
                     })
                     .fetch('GET', fromUrl, headers)
+                    .progress((received, total) => {
+                        console.log('progress', received / total);
+                    })
                     .then(res => {
                         if (res.respInfo.status === 304) {
                             return Promise.resolve(toFile);
