@@ -97,8 +97,8 @@ module.exports = {
                         path: tmpFile
                     })
                     .fetch('GET', fromUrl, headers)
-                    .progress((received, total) => {
-                        console.log('progress', received / total);
+                    .progress({ count : 5 }, (received, total) => {
+                        console.log('progress: '+received+' out of '+total+' -- '+fromUrl);
                     })
                     .then(res => {
                         if (res.respInfo.status === 304) {
