@@ -1,48 +1,142 @@
 'use strict';
 
-jest.mock('rn-fetch-blob', () => ({default: {fs: {}}}));
-jest.mock('react-native-clcasher/MemoryCache', () => ({default: {}}));
+const _ = require('lodash');
 
-import ImageCacheManager from '../ImageCacheManager';
-import SimpleMemoryCache from './SimpleMemoryCache';
-import SimpleMemoryFs from './SimpleMemoryFs';
+const fsUtils = require('./utils/fsUtils');
+const pathUtils = require('./utils/pathUtils');
+const MemoryCache = require('react-native-clcasher/MemoryCache').default;
 
-const icm = ImageCacheManager({}, SimpleMemoryCache, SimpleMemoryFs);
+module.exports = (defaultOptions = {}, urlCache = MemoryCache, fs = fsUtils, path = pathUtils) => {
 
-describe('ImageCacheManager', () => {
+    const defaultDefaultOptions = {
+        headers: {},
+        ttl: 60 * 60 * 24 * 14, // 2 weeks
+        useQueryParamsInCacheKey: false,
+        cacheLocation: fs.getCacheDir(),
+        allowSelfSignedSSL: false,
+    };
 
-    beforeEach(() => icm.clearCache());
+    // apply default options
+    _.defaults(defaultOptions, defaultDefaultOptions);
 
-    describe('downloadAndCacheUrl', () => {
+    function isCacheable(url) {
+        return _.isString(url) && (_.startsWith(url.toLowerCase(), 'http://') || _.startsWith(url.toLowerCase(), 'https://'));
+    }
 
-        it('should fail if URL is not cacheable', () => {
-            return icm.getCacheInfo()
-                .then(res => console.log(res))
-                .then(() => {
-                    return expect(icm.downloadAndCacheUrl('not a real url')).rejects.toBeDefined();
-                });
-        });
+    function cacheUrl(url, options, getCachedFile) {
+        if (!isCacheable(url)) {
+            return Promise.reject(new Error('Url is not cacheable'));
+        }
+        // allow CachedImage to provide custom options
+        _.defaults(options, defaultOptions);
+        // cacheableUrl contains only the needed query params
+        const cacheableUrl = path.getCacheableUrl(url, options.useQueryParamsInCacheKey);
+        // note: urlCache may remove the entry if it expired so we need to remove the leftover file manually
+        return urlCache.get(cacheableUrl)
+            .then(fileRelativePath => {
+                if (!fileRelativePath) {
+                    // console.log('ImageCacheManager: url cache miss', cacheableUrl);
+                    throw new Error('URL expired or not in cache');
+                }
+                // console.log('ImageCacheManager: url cache hit', cacheableUrl);
+                const cachedFilePath = `${options.cacheLocation}/${fileRelativePath}`;
 
-        it('should download a file when not in cache', () => {
-            return icm.getCacheInfo()
-                .then(res => console.log(res))
-                .then(() => icm.downloadAndCacheUrl('https://example.com/image.jpg'))
-                .then(() => icm.getCacheInfo())
-                .then(res => console.log(res))
-        });
+                return fs.exists(cachedFilePath)
+                    .then((exists) => {
+                        if (exists) {
+                            return cachedFilePath
+                        } else {
+                            throw new Error('file under URL stored in url cache doesn\'t exsts');
+                        }
+                    });
+            })
+            // url is not found in the cache or is expired
+            .catch(() => {
+                const fileRelativePath = path.getImageRelativeFilePath(cacheableUrl);
+                const filePath = `${options.cacheLocation}/${fileRelativePath}`
 
-        it('should add new entry to the cache if not in cache', () => {
+                // remove expired file if exists
+                return fs.deleteFile(filePath)
+                    // get the image to cache (download / copy / etc)
+                    .then(() => getCachedFile(filePath))
+                    // add to cache
+                    .then(() => urlCache.set(cacheableUrl, fileRelativePath, options.ttl))
+                    // return filePath
+                    .then(() => filePath);
+            });
+    }
 
-        });
+    return {
 
-        it('should return file name if image is in cache', () => {
+        /**
+         * download an image and cache the result according to the given options
+         * @param url
+         * @param options
+         * @param progressHandler
+         * @returns {Promise}
+         */
+        downloadAndCacheUrl(url, options = {}, progressHandler, progressCount) {
+            return cacheUrl(
+                url,
+                options,
+                filePath => fs.downloadFile(url, filePath, options.headers, progressHandler, progressCount)
+            );
+        },
 
-        });
+        /**
+         * seed the cache for a specific url with a local file
+         * @param url
+         * @param seedPath
+         * @param options
+         * @returns {Promise}
+         */
+        seedAndCacheUrl(url, seedPath, options = {}) {
+            return cacheUrl(
+                url,
+                options,
+                filePath => fs.copyFile(seedPath, filePath)
+            );
+        },
 
-        it('should not return cached entry if expired', () => {
+        /**
+         * delete the cache entry and file for a given url
+         * @param url
+         * @param options
+         * @returns {Promise}
+         */
+        deleteUrl(url, options = {}) {
+            if (!isCacheable(url)) {
+                return Promise.reject(new Error('Url is not cacheable'));
+            }
+            _.defaults(options, defaultOptions);
+            const cacheableUrl = path.getCacheableUrl(url, options.useQueryParamsInCacheKey);
+            const filePath = path.getImageFilePath(cacheableUrl, options.cacheLocation);
+            // remove file from cache
+            return urlCache.remove(cacheableUrl)
+                // remove file from disc
+                .then(() => fs.deleteFile(filePath));
+        },
 
-        });
+        /**
+         * delete all cached file from the filesystem and cache
+         * @param options
+         * @returns {Promise}
+         */
+        clearCache(options = {}) {
+            _.defaults(options, defaultOptions);
+            return urlCache.flush()
+                .then(() => fs.cleanDir(options.cacheLocation));
+        },
 
-    });
+        /**
+         * return info about the cache, list of files and the total size of the cache
+         * @param options
+         * @returns {Promise.<{file: Array, size: Number}>}
+         */
+        getCacheInfo(options = {}) {
+            _.defaults(options, defaultOptions);
+            return fs.getDirInfo(options.cacheLocation);
+        },
 
-});
+    };
+};
